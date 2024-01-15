@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"text/template"
 	"time"
+	"strconv"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 )
+
 
 const (
 	templatePath = "./template"
@@ -18,10 +20,21 @@ const (
 	createPath   = templatePath + "/create.html"
 	// ブログポストテーブルにデータを挿入するSQL文
 	insertPostQuery = `INSERT INTO posts (title, body, author, created_at) VALUES (?, ?, ?, ?)`
+	//ブログポストテーブルからデータを取得(idで)
+	selectPostByIdQuery = `SELECT * FROM posts WHERE id = ?`
 )
+
+type Post struct {
+    ID        int    `db:"id"`
+    Title     string `db:"title"`
+    Body      string `db:"body"`
+    Author    string `db:"author"`
+    CreatedAt int64  `db:"created_at"`
+}
 
 var (
 	indexTemplate        = template.Must(template.ParseFiles(layoutPath, templatePath+"/index.html"))
+	postTemplate  = template.Must(template.ParseFiles(layoutPath,templatePath+"/post.html"))
 	db                   *sqlx.DB
 	createPostTableQuery = `CREATE TABLE IF NOT EXISTS posts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,6 +44,7 @@ var (
         created_at INTEGER
     )`
 	createTemplate = template.Must(template.ParseFiles(layoutPath, createPath))
+	
 )
 
 func main() {
@@ -42,6 +56,7 @@ func main() {
 	}
 
 	http.HandleFunc("/", IndexHandler)
+	http.HandleFunc("/post/",postHandler)
 	http.HandleFunc("/post/new", createPostHandler)
 	fmt.Println("Server is listening on http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -72,6 +87,32 @@ func initDB() error {
 	return nil
 }
 
+func postHandler(w http.ResponseWriter, r *http.Request) {
+    // URLのPathからIDを取得
+    id := r.URL.Path[len("/post/"):]
+	//idをstringからintへ
+	idInt,err := strconv.Atoi(id)
+		if err != nil{
+			log.Print(err)
+			return
+		}
+    // ブログポストを取得
+    post, err := getPostById(idInt)
+    if err != nil {
+        log.Print(err)
+        // InternalServerErrorを返す
+        return
+    }
+    // テンプレートを表示
+    postTemplate.ExecuteTemplate(w, "layout.html", map[string]interface{}{
+        "Title": post.Title,
+        "PageTitle": post.Title,
+        "Body":      post.Body,
+		"CreatedAt": time.Unix(post.CreatedAt,0).Format("2006-01-02 15:04:05"),
+		"Author": post.Author,
+    })
+}
+
 func createPostHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		// GETリクエストの場合はテンプレートを表示
@@ -92,23 +133,45 @@ func createPostHandler(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		err := insertPost(title, body, author, createdAt)
+
+		id,err := insertPost(title, body, author, createdAt)
 		if err != nil {
 			log.Print(err)
 			return
 		}
 
+		http.Redirect(w,r,"/post/"+strconv.FormatInt(id,10),http.StatusFound)
 	}
 }
 
 // ブログポストを作成
-func insertPost(title string, body string, author string, createdAt int64) error {
+func insertPost(title string, body string, author string, createdAt int64) (int64,error) {
 	// ブログポストテーブルにデータを挿入　last_insert_rowid()で最後に挿入したデータのIDを取得
-	_, err := db.Exec(insertPostQuery, title, body, author, createdAt)
+	result, err := db.Exec(insertPostQuery, title, body, author, createdAt)
 	if err != nil {
 		log.Print(err)
 		// InternalServerErrorを返す
-		return err
+		return 0,err
 	}
-	return nil
+	id , err := result.LastInsertId()
+	println(result)
+	if err != nil {
+        log.Print(err)
+        // InternalServerErrorを返す
+        return 0, err
+    }
+    return id, nil
+}
+
+// ブログポストをIDで取得
+func getPostById(id int) (Post, error) {
+    // ブログポストを取得
+    var post Post
+    err := db.Get(&post, selectPostByIdQuery, id)
+    if err != nil {
+        log.Print(err)
+        // InternalServerErrorを返す
+        return post, err
+    }
+    return post, nil
 }
