@@ -22,6 +22,8 @@ const (
 	insertPostQuery = `INSERT INTO posts (title, body, author, created_at) VALUES (?, ?, ?, ?)`
 	//ブログポストテーブルからデータを取得(idで)
 	selectPostByIdQuery = `SELECT * FROM posts WHERE id = ?`
+	// ブログポストテーブルから全てのデータを取得するSQL文
+	selectAllPostsQuery = `SELECT * FROM posts`
 )
 
 type Post struct {
@@ -63,9 +65,15 @@ func main() {
 }
 
 func IndexHandler(w http.ResponseWriter, r *http.Request) {
+	posts, err := getAllPosts()
+	if err != nil{
+		log.Print(err)
+		return
+	}
+
 	indexTemplate.ExecuteTemplate(w, "layout.html", map[string]interface{}{
-		"PageTitle": "Home Page",
-		"Text":      "Hello w",
+		"PageTitle": "記事一覧",
+		"Posts" : posts,
 	})
 }
 
@@ -174,4 +182,17 @@ func getPostById(id int) (Post, error) {
         return post, err
     }
     return post, nil
+}
+
+// 全てのブログポストを取得
+func getAllPosts() ([]Post, error) {
+    // ブログポストを全て取得
+    var posts []Post
+    err := db.Select(&posts, selectAllPostsQuery)
+    if err != nil {
+        log.Print(err)
+        // InternalServerErrorを返す
+        return posts, err
+    }
+    return posts, nil
 }
